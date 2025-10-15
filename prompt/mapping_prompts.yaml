@@ -1,0 +1,110 @@
+templates:
+- task_id: document_mapping_generation
+  name: Document Mapping Generator
+  description: 생성된 문서와 원본 소스 문서들 간의 관계를 정확하게 매핑하는 프롬프트
+  prompt_role: user
+  version: '1.0'
+  last_updated: '2025-10-15'
+  template: |-
+    당신은 문서 분석 전문가입니다. 생성된 문서와 원본 소스 문서들 간의 관계를 정확하게 매핑해야 합니다.
+
+    ## 작업 개요
+    - **생성된 문서**: {{ structured_generated_doc.metadata.title }}
+    - **소스 문서 수**: {{ structured_source_docs|length }}개
+    - **매핑 방식**: 생성된 문서의 각 문장이 어느 소스 문서의 어떤 문장들을 참조/요약했는지 식별
+
+    ## 소스 문서들
+
+    {% for source_doc in structured_source_docs %}
+    ### 소스 문서 {{ loop.index }}: {{ source_doc.metadata.title }}
+    **문서 ID**: `{{ source_doc.doc_id }}`
+    **문장 목록**:
+    {% for sentence in source_doc.content.sentences %}
+    - `{{ sentence.id }}` (라인 {{ sentence.lines|join(', ') }}): {{ sentence.text }}
+    {% endfor %}
+
+    {% endfor %}
+
+    ## 생성된 문서
+
+    **문서 ID**: `{{ structured_generated_doc.doc_id }}`
+    **제목**: {{ structured_generated_doc.metadata.title }}
+    **문장 목록**:
+    {% for sentence in structured_generated_doc.content.sentences %}
+    - `{{ sentence.id }}` (라인 {{ sentence.lines|join(', ') }}): {{ sentence.text }}
+    {% endfor %}
+
+    {% if existing_mappings %}
+    ## 기존 매핑 정보 (참고용)
+
+    ### 생성된 문서 → 소스 문서 매핑
+    ```json
+    {{ existing_mappings.generated_doc_to_source_doc | tojson(indent=2) }}
+    ```
+
+    ### 소스 문서 → 생성된 문서 매핑
+    ```json
+    {{ existing_mappings.source_doc_to_generated_doc | tojson(indent=2) }}
+    ```
+
+    **주의**: 기존 매핑이 정확하지 않을 수 있습니다. 반드시 검증하고 수정하세요.
+    {% endif %}
+
+    ## 매핑 규칙
+
+    1. **정확성**: 생성된 문서의 각 문장이 실제로 참조하는 소스 문장들만 매핑
+    2. **완전성**: 모든 생성된 문서 문장에 대해 매핑 제공 (매핑이 없으면 빈 배열)
+    3. **다중 참조**: 하나의 생성된 문서 문장이 여러 소스 문장을 참조할 수 있음
+    4. **교차 문서**: 여러 소스 문서의 문장들을 통합한 경우 모두 포함
+    5. **양방향**: generated_doc_to_source_doc와 source_doc_to_generated_doc 모두 생성
+
+    ## 출력 형식
+
+    다음 JSON 형식으로 매핑 정보를 반환하세요:
+
+    ```json
+    {
+      "generated_doc_to_source_doc": {
+        "gen_001_s1": ["src_001_s1", "src_001_s2"],
+        "gen_001_s2": ["src_001_s5", "src_002_s1"],
+        "gen_001_s3": ["src_002_s3"]
+      },
+      "source_doc_to_generated_doc": {
+        "src_001_s1": ["gen_001_s1"],
+        "src_001_s2": ["gen_001_s1"],
+        "src_001_s5": ["gen_001_s2"],
+        "src_002_s1": ["gen_001_s2"],
+        "src_002_s3": ["gen_001_s3"]
+      }
+    }
+    ```
+
+    **필드 설명:**
+    - generated_doc_to_source_doc: 생성된 문서 문장 ID → 소스 문서 문장 ID 배열
+    - source_doc_to_generated_doc: 소스 문서 문장 ID → 생성된 문서 문장 ID 배열
+    - 모든 ID는 위 문서에 명시된 실제 ID를 사용 (예: gen_001_s1, src_001_s2)
+    - 매핑이 없는 문장은 빈 배열 []로 표시
+
+    ## 분석 프로세스
+
+    1. 각 생성된 문서 문장을 읽고 핵심 내용 파악
+    2. 해당 내용이 어느 소스 문서의 어떤 문장에서 유래했는지 식별
+    3. 의미적 유사성과 키워드 일치를 기준으로 매핑
+    4. 여러 문장이 통합된 경우 모두 포함
+    5. 양방향 매핑의 일관성 검증
+
+    ## 예시
+
+    **생성된 문서 문장**: "AI 윤리와 투명성이 중요하다."
+    **소스 문장 1**: "AI 윤리 원칙의 중요성"
+    **소스 문장 2**: "AI 시스템은 투명하고 공정해야 한다."
+
+    → 매핑: `gen_s1 → [src_001_s1, src_001_s2]`
+
+    ---
+
+    **중요 지침:**
+    - 위 문서들을 분석하여 완전하고 정확한 매핑 정보를 생성하세요
+    - 응답은 반드시 순수 JSON 형식이어야 합니다
+    - 추가 설명, 마크다운, 주석 없이 JSON만 출력하세요
+    - 모든 문장 ID는 위 문서에 명시된 실제 ID를 정확히 사용하세요

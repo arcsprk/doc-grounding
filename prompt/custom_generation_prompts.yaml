@@ -1,0 +1,116 @@
+templates:
+- task_id: custom_document_generation
+  name: Custom Document Generator
+  description: N개 소스 문서 + 사용자 요구사항 기반 신규 문서 생성
+  prompt_role: user
+  version: '1.0'
+  last_updated: '2025-10-15'
+  template: |-
+    당신은 전문 문서 작성 전문가입니다. 사용자가 제공한 여러 소스 문서들을 참조하여, 사용자의 요구사항에 맞는 새로운 문서를 작성해야 합니다.
+
+    ## 소스 문서들
+
+    {% for source_doc in source_documents %}
+    ### 소스 문서 {{ loop.index }}: {{ source_doc.metadata.title }}
+    **문서 ID**: `{{ source_doc.doc_id }}`
+    **전체 내용**:
+    {% for sentence in source_doc.content.sentences %}
+    [{{ sentence.id }}] {{ sentence.text }}
+    {% endfor %}
+
+    {% endfor %}
+
+    ## 사용자 요구사항
+
+    {{ user_requirements }}
+
+    ## 작성 지침
+
+    1. **정확성**: 소스 문서의 내용을 정확하게 참조하세요
+    2. **자연스러움**: 생성된 문서는 자연스럽고 일관성 있게 작성하세요
+    3. **요구사항 준수**: 사용자의 요구사항을 철저히 반영하세요
+    4. **출처 명시**: 각 문장이 어떤 소스 문장을 참조했는지 명확히 표시하세요
+    5. **통합**: 여러 소스의 내용을 자연스럽게 통합하세요
+
+    ## 출력 형식
+
+    다음 JSON 형식으로 결과를 반환하세요:
+
+    ```json
+    {
+      "title": "생성된 문서의 제목",
+      "content": "생성된 문서의 전체 텍스트 내용입니다. 여러 문장으로 구성됩니다.",
+      "sentences": [
+        {
+          "text": "첫 번째 문장입니다.",
+          "source_references": ["src_001_s1", "src_001_s2"]
+        },
+        {
+          "text": "두 번째 문장입니다.",
+          "source_references": ["src_002_s3"]
+        },
+        {
+          "text": "세 번째 문장입니다.",
+          "source_references": []
+        }
+      ],
+      "metadata": {
+        "generation_method": "custom_generation",
+        "source_document_count": 2,
+        "reasoning": "문서 생성 과정에 대한 간단한 설명"
+      }
+    }
+    ```
+
+    **필드 설명:**
+    - `title`: 생성된 문서의 제목 (사용자 요구사항 기반)
+    - `content`: 생성된 전체 텍스트 (문장들을 연결한 자연스러운 문서)
+    - `sentences`: 문장 배열
+      - `text`: 개별 문장 텍스트
+      - `source_references`: 이 문장이 참조한 소스 문장 ID 배열 (위 소스 문서의 실제 ID 사용)
+        - 여러 소스 문장을 통합한 경우 모두 포함
+        - 전혀 참조하지 않은 경우 빈 배열 []
+    - `metadata`: 생성 과정 메타데이터
+
+    ## 예시
+
+    **소스 문서 1 (AI 윤리):**
+    - [src_001_s1] "AI 시스템은 투명해야 한다."
+    - [src_001_s2] "사용자의 개인정보를 보호해야 한다."
+
+    **소스 문서 2 (데이터 보안):**
+    - [src_002_s1] "데이터는 암호화되어야 한다."
+
+    **사용자 요구사항:**
+    "AI 개발자를 위한 핵심 가이드라인 작성"
+
+    **출력 예시:**
+    ```json
+    {
+      "title": "AI 개발 핵심 가이드라인",
+      "content": "AI 개발 시 투명성과 개인정보 보호가 핵심입니다. 데이터는 반드시 암호화하세요.",
+      "sentences": [
+        {
+          "text": "AI 개발 시 투명성과 개인정보 보호가 핵심입니다.",
+          "source_references": ["src_001_s1", "src_001_s2"]
+        },
+        {
+          "text": "데이터는 반드시 암호화하세요.",
+          "source_references": ["src_002_s1"]
+        }
+      ],
+      "metadata": {
+        "generation_method": "custom_generation",
+        "source_document_count": 2,
+        "reasoning": "두 소스 문서의 핵심 내용을 통합하여 개발자용 가이드라인으로 재작성"
+      }
+    }
+    ```
+
+    ---
+
+    **중요:**
+    - 응답은 반드시 순수 JSON 형식이어야 합니다
+    - 추가 설명, 마크다운, 주석 없이 JSON만 출력하세요
+    - 모든 `source_references`는 위 소스 문서에 명시된 실제 문장 ID를 사용하세요
+    - `content` 필드는 `sentences`의 `text`를 자연스럽게 연결한 전체 문서여야 합니다
