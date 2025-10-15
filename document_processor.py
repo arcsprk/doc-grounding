@@ -2,16 +2,91 @@
 문서 구조화 및 매핑 생성 도구
 - 텍스트 문서를 구조화된 JSON 형식으로 변환
 - LLM을 사용하여 요약문과 원본 문서 간의 매핑 생성
+
+개선 버전 (v2):
+- 정확한 여러 줄 문장 처리
+- 문자 위치 기반 라인 매핑
+- Fuzzy 검색 지원
 """
 
 import re
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import nltk
 from nltk.tokenize import sent_tokenize
+from difflib import SequenceMatcher
 
 # NLTK 데이터 다운로드 (최초 1회)
 # nltk.download('punkt')
+
+
+def fuzzy_search(text: str, pattern: str, start_pos: int = 0) -> int:
+    """
+    Fuzzy 문자열 검색 - 공백/줄바꿈 차이를 무시하고 문장 위치 찾기
+
+    Args:
+        text: 검색 대상 텍스트
+        pattern: 찾을 패턴 (문장)
+        start_pos: 검색 시작 위치
+
+    Returns:
+        찾은 위치 (못 찾으면 -1)
+    """
+    # 공백 정규화
+    pattern_normalized = ' '.join(pattern.split())
+
+    # 슬라이딩 윈도우로 검색
+    pattern_len = len(pattern)
+    search_window = pattern_len + 50  # 여유 공간
+
+    for i in range(start_pos, len(text) - pattern_len + 1):
+        window = text[i:i + search_window]
+        window_normalized = ' '.join(window.split())
+
+        # 유사도 계산
+        similarity = SequenceMatcher(None, pattern_normalized, window_normalized).ratio()
+
+        if similarity > 0.9:  # 90% 이상 유사
+            return i
+
+    return -1
+
+
+def build_char_to_line_map(lines_text: List[str]) -> Tuple[Dict[int, int], List[Dict[str, Any]]]:
+    """
+    문자 위치 → 라인 번호 매핑 테이블 생성
+
+    Args:
+        lines_text: 라인 텍스트 리스트
+
+    Returns:
+        (char_to_line_map, line_data)
+        - char_to_line_map: {문자위치: 라인번호}
+        - line_data: 라인 정보 리스트
+    """
+    char_to_line_map = {}
+    line_data = []
+    current_char_pos = 0
+
+    for line_num, line_text in enumerate(lines_text, 1):
+        line_start = current_char_pos
+        line_end = current_char_pos + len(line_text)
+
+        # 이 라인의 각 문자 위치 기록
+        for char_pos in range(line_start, line_end):
+            char_to_line_map[char_pos] = line_num
+
+        line_data.append({
+            "line_num": line_num,
+            "text": line_text,
+            "start": line_start,
+            "end": line_end,
+            "sentence_ids": []
+        })
+
+        current_char_pos = line_end + 1  # +1 for '\n'
+
+    return char_to_line_map, line_data
 
 
 def structure_document(
@@ -22,104 +97,99 @@ def structure_document(
     metadata: Optional[Dict] = None
 ) -> Dict[str, Any]:
     """
-    텍스트 문서를 구조화된 JSON 형식으로 변환
-    
+    텍스트 문서를 구조화된 JSON 형식으로 변환 (개선 버전 v2)
+
+    알고리즘:
+    1. 문자 위치 → 라인 번호 매핑 테이블 생성
+    2. NLTK로 전체 텍스트의 문장 분리
+    3. 각 문장의 원본 텍스트 내 위치 찾기 (Fuzzy 검색 포함)
+    4. 문장이 걸친 라인들을 정확히 계산
+    5. 라인별 sentence_ids 업데이트
+
     Args:
         text: 원본 텍스트 (줄바꿈 포함)
         doc_id: 문서 고유 ID (예: "src_001", "gen_001")
         title: 문서 제목
         doc_type: 문서 타입 ("source" 또는 "generated")
         metadata: 추가 메타데이터 (선택사항)
-    
+
     Returns:
         구조화된 문서 딕셔너리
     """
+    # === 1단계: 문자 위치 → 라인 번호 매핑 테이블 생성 ===
     lines_text = text.split('\n')
-    lines = []
-    sentences = []
-    sentence_counter = 1
-    
-    # 각 라인을 처리
-    for line_num, line_content in enumerate(lines_text, start=1):
-        line_sentences = []
-        
-        if not line_content.strip():
-            # 빈 줄
-            lines.append({
-                "line_num": line_num,
-                "text": line_content,
-                "sentence_ids": []
-            })
+    char_to_line_map, line_data = build_char_to_line_map(lines_text)
+
+    # === 2단계: 전체 텍스트의 문장 분리 (NLTK) ===
+    try:
+        sentences_texts = sent_tokenize(text)
+    except Exception as e:
+        print(f"⚠️ NLTK 문장 분리 실패, 정규식 사용: {e}")
+        # NLTK 실패 시 간단한 정규식 사용
+        sentences_texts = re.split(r'(?<=[.!?])\s+', text)
+
+    sentence_data = []
+    search_pos = 0
+
+    # === 3단계: 각 문장의 위치 찾기 및 라인 매핑 ===
+    for sent_idx, sent_text in enumerate(sentences_texts):
+        sent_text = sent_text.strip()
+        if not sent_text:
             continue
-        
-        # 문장 분리 (NLTK 사용)
-        try:
-            sents = sent_tokenize(line_content)
-        except:
-            # NLTK 실패 시 간단한 정규식 사용
-            sents = re.split(r'(?<=[.!?])\s+', line_content)
-        
-        current_pos = 0
-        for sent_text in sents:
-            sent_text = sent_text.strip()
-            if not sent_text:
-                continue
-            
-            sentence_id = f"{doc_id}_s{sentence_counter}"
-            
-            # 라인 내에서 문장의 위치 찾기
-            sent_start = line_content.find(sent_text, current_pos)
-            if sent_start == -1:
-                sent_start = current_pos
-            
-            # 문장이 이 라인에서 어디까지 포함되는지 확인
-            sent_end = sent_start + len(sent_text)
-            
-            # 문장이 다음 라인으로 이어지는지 확인
-            lines_covered = [line_num]
-            remaining_text = sent_text
-            
-            # 현재 라인에 포함된 부분 계산
-            if sent_end > len(line_content):
-                # 문장이 다음 라인으로 이어짐 (여러 라인에 걸침)
-                # 이 경우는 후처리에서 처리
-                pass
-            
-            line_sentences.append(sentence_id)
-            
-            sentences.append({
-                "id": sentence_id,
-                "text": sent_text,
-                "lines": lines_covered,
-                "doc_id": doc_id
-            })
-            
-            sentence_counter += 1
-            current_pos = sent_end
-        
-        lines.append({
-            "line_num": line_num,
-            "text": line_content,
-            "sentence_ids": line_sentences
+
+        # 원본 텍스트에서 문장 위치 찾기
+        sent_start = text.find(sent_text, search_pos)
+
+        if sent_start == -1:
+            # 공백/줄바꿈 차이로 못 찾으면 Fuzzy 검색
+            sent_start = fuzzy_search(text, sent_text, search_pos)
+
+        if sent_start == -1:
+            # 그래도 못 찾으면 스킵 (매우 드문 경우)
+            print(f"⚠️ 문장을 찾을 수 없음: {sent_text[:50]}...")
+            continue
+
+        sent_end = sent_start + len(sent_text)
+
+        # === 4단계: 이 문장이 걸친 라인들 계산 ===
+        covered_lines = set()
+        for char_pos in range(sent_start, min(sent_end, len(text))):
+            if char_pos in char_to_line_map:
+                covered_lines.add(char_to_line_map[char_pos])
+
+        sent_id = f"{doc_id}_s{sent_idx + 1}"
+        covered_lines_list = sorted(list(covered_lines))
+
+        # === 5단계: 라인별 sentence_ids 업데이트 ===
+        for line_num in covered_lines_list:
+            if 1 <= line_num <= len(line_data):
+                line_data[line_num - 1]["sentence_ids"].append(sent_id)
+
+        sentence_data.append({
+            "id": sent_id,
+            "text": sent_text,
+            "lines": covered_lines_list,
+            "doc_id": doc_id
         })
-    
-    # 여러 라인에 걸친 문장 후처리
-    sentences = post_process_multiline_sentences(lines, sentences)
-    
-    # 결과 구조 생성
+
+        search_pos = sent_end
+
+    # === 결과 구조 생성 ===
     result = {
         "doc_id": doc_id,
         "metadata": {
             "title": title,
-            "total_lines": len(lines),
+            "total_lines": len(line_data),
+            "total_sentences": len(sentence_data),
+            "algorithm_version": "v2",
             **(metadata or {})
         },
         "content": {
-            "lines": lines,
-            "sentences": sentences
+            "lines": line_data,
+            "sentences": sentence_data
         }
     }
-    
+
     return result
 
 
