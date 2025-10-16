@@ -5,12 +5,19 @@ templates:
   prompt_role: user
   version: '1.0'
   last_updated: '2025-10-15'
+  llm_provider: openai
+  model: gpt-4o-mini
+  parameters:
+    temperature: 0.1
+    max_tokens: 4000
+    response_format: {"type": "json_object"}
   template: |-
     당신은 전문 문서 작성 전문가입니다. 사용자가 제공한 여러 소스 문서들을 참조하여, 사용자의 요구사항에 맞는 새로운 문서를 작성해야 합니다.
 
-    ## 소스 문서들
+    {% if structured_source_documents %}
+    ## 구조화된 소스 문서들
 
-    {% for source_doc in source_documents %}
+    {% for source_doc in structured_source_documents %}
     ### 소스 문서 {{ loop.index }}: {{ source_doc.metadata.title }}
     **문서 ID**: `{{ source_doc.doc_id }}`
     **전체 내용**:
@@ -19,6 +26,17 @@ templates:
     {% endfor %}
 
     {% endfor %}
+    {% endif %}
+
+    {% if source_documents %}
+    ## Plain Text 소스 문서들
+
+    {% for doc in source_documents %}
+    ### 문서 {{ loop.index }}
+    {{ doc }}
+
+    {% endfor %}
+    {% endif %}
 
     ## 사용자 요구사항
 
@@ -43,11 +61,11 @@ templates:
       "sentences": [
         {
           "text": "첫 번째 문장입니다.",
-          "source_references": ["src_001_s1", "src_001_s2"]
+          "source_references": ["DOC_1-ST_1", "DOC_1-ST_2"]
         },
         {
           "text": "두 번째 문장입니다.",
-          "source_references": ["src_002_s3"]
+          "source_references": ["DOC_2-ST_3"]
         },
         {
           "text": "세 번째 문장입니다.",
@@ -75,11 +93,11 @@ templates:
     ## 예시
 
     **소스 문서 1 (AI 윤리):**
-    - [src_001_s1] "AI 시스템은 투명해야 한다."
-    - [src_001_s2] "사용자의 개인정보를 보호해야 한다."
+    - [DOC_1-ST_1] "AI 시스템은 투명해야 한다."
+    - [DOC_1-ST_2] "사용자의 개인정보를 보호해야 한다."
 
     **소스 문서 2 (데이터 보안):**
-    - [src_002_s1] "데이터는 암호화되어야 한다."
+    - [DOC_2-ST_1] "데이터는 암호화되어야 한다."
 
     **사용자 요구사항:**
     "AI 개발자를 위한 핵심 가이드라인 작성"
@@ -92,11 +110,11 @@ templates:
       "sentences": [
         {
           "text": "AI 개발 시 투명성과 개인정보 보호가 핵심입니다.",
-          "source_references": ["src_001_s1", "src_001_s2"]
+          "source_references": ["DOC_1-ST_1", "DOC_1-ST_2"]
         },
         {
           "text": "데이터는 반드시 암호화하세요.",
-          "source_references": ["src_002_s1"]
+          "source_references": ["DOC_2-ST_1"]
         }
       ],
       "metadata": {
@@ -114,3 +132,265 @@ templates:
     - 추가 설명, 마크다운, 주석 없이 JSON만 출력하세요
     - 모든 `source_references`는 위 소스 문서에 명시된 실제 문장 ID를 사용하세요
     - `content` 필드는 `sentences`의 `text`를 자연스럽게 연결한 전체 문서여야 합니다
+
+- task_id: custom_doc_anthropic
+  name: Custom Document Generator (Claude)
+  description: Claude를 사용한 커스텀 문서 생성
+  prompt_role: user
+  version: '1.0'
+  last_updated: '2025-10-16'
+  llm_provider: anthropic
+  model: claude-3-5-sonnet-20241022
+  parameters:
+    temperature: 0.1
+    max_tokens: 4000
+  template: |-
+    당신은 전문 문서 작성 전문가입니다. JSON 형식으로 정확하게 응답합니다.
+
+    {% if structured_source_documents %}
+    ## 구조화된 소스 문서들
+    {% for source_doc in structured_source_documents %}
+    ### 문서 {{ loop.index }}: {{ source_doc.metadata.title }}
+    **문서 ID**: `{{ source_doc.doc_id }}`
+    {% for sentence in source_doc.content.sentences %}
+    [{{ sentence.id }}] {{ sentence.text }}
+    {% endfor %}
+    {% endfor %}
+    {% endif %}
+
+    {% if source_documents %}
+    ## Plain Text 소스 문서들
+    {% for doc in source_documents %}
+    ### 문서 {{ loop.index }}
+    {{ doc }}
+    {% endfor %}
+    {% endif %}
+
+    ## 사용자 요구사항
+    {{ user_requirements }}
+
+    ## 출력 형식
+    다음 JSON 형식으로 결과를 반환하세요:
+    ```json
+    {
+      "title": "생성된 문서 제목",
+      "content": "전체 문서 내용",
+      "sentences": [
+        {"text": "문장", "source_references": ["참조ID"]}
+      ],
+      "metadata": {
+        "generation_method": "custom_generation",
+        "source_document_count": 0,
+        "reasoning": "생성 설명"
+      }
+    }
+    ```
+
+    응답은 반드시 순수 JSON 형식이어야 합니다. 추가 설명 없이 JSON만 출력하세요.
+
+- task_id: custom_doc_rest
+  name: Custom Document Generator (REST API)
+  description: REST API 기반 커스텀 문서 생성
+  prompt_role: user
+  version: '1.0'
+  last_updated: '2025-10-16'
+  llm_provider: rest_api
+  model: gpt-oss-120b
+  parameters:
+    temperature: 0.1
+    max_tokens: 4000
+  template: |-
+    당신은 전문 문서 작성 전문가입니다. JSON 형식으로 정확하게 응답합니다.
+
+    {% if structured_source_documents %}
+    ## 구조화된 소스 문서들
+    {% for source_doc in structured_source_documents %}
+    ### 문서 {{ loop.index }}: {{ source_doc.metadata.title }}
+    **문서 ID**: `{{ source_doc.doc_id }}`
+    {% for sentence in source_doc.content.sentences %}
+    [{{ sentence.id }}] {{ sentence.text }}
+    {% endfor %}
+    {% endfor %}
+    {% endif %}
+
+    {% if source_documents %}
+    ## Plain Text 소스 문서들
+    {% for doc in source_documents %}
+    ### 문서 {{ loop.index }}
+    {{ doc }}
+    {% endfor %}
+    {% endif %}
+
+    ## 사용자 요구사항
+    {{ user_requirements }}
+
+    JSON 형식으로 다음 구조를 따라 응답하세요:
+    {
+      "title": "문서 제목",
+      "content": "전체 내용",
+      "sentences": [{"text": "문장", "source_references": []}],
+      "metadata": {"generation_method": "custom_generation", "source_document_count": 0, "reasoning": "설명"}
+    }
+
+- task_id: prompt_generator
+  name: Prompt Template Generator
+  description: 여러 소스 프롬프트 템플릿과 사용자 요구사항을 기반으로 새로운 프롬프트 템플릿 생성
+  prompt_role: user
+  version: '1.0'
+  last_updated: '2025-10-16'
+  llm_provider: openai
+  model: gpt-4o-mini
+  parameters:
+    temperature: 0.3
+    max_tokens: 4000
+    response_format: {"type": "json_object"}
+  template: |-
+    당신은 전문 프롬프트 엔지니어입니다. 제공된 소스 프롬프트 템플릿들을 분석하고, 사용자의 요구사항에 맞는 새로운 프롬프트 템플릿을 작성해야 합니다.
+
+    {% if structured_source_documents %}
+    ## 참고 프롬프트 템플릿들
+
+    {% for source_doc in structured_source_documents %}
+    ### 템플릿 {{ loop.index }}: {{ source_doc.metadata.title | default('프롬프트 ' ~ loop.index) }}
+    **용도**: {{ source_doc.metadata.description | default('설명 없음') }}
+    **템플릿 내용**:
+    ```
+    {% for sentence in source_doc.content.sentences %}
+    {{ sentence.text }}
+    {% endfor %}
+    ```
+
+    {% endfor %}
+    {% endif %}
+
+    {% if source_documents %}
+    ## 참고 프롬프트 (Plain Text)
+
+    {% for doc in source_documents %}
+    ### 프롬프트 {{ loop.index }}
+    ```
+    {{ doc }}
+    ```
+
+    {% endfor %}
+    {% endif %}
+
+    ## 사용자 요구사항
+    {{ user_requirements }}
+
+    ## 프롬프트 작성 지침
+
+    1. **구조 분석**: 제공된 프롬프트들의 구조와 패턴을 분석하세요
+    2. **핵심 요소 추출**: 효과적인 프롬프트의 핵심 요소들을 파악하세요
+    3. **목적 명확화**: 새 프롬프트의 목적과 사용 맥락을 명확히 하세요
+    4. **구체성**: 명확하고 구체적인 지시사항을 포함하세요
+    5. **예시 포함**: 가능한 경우 입출력 예시를 포함하세요
+    6. **변수 처리**: Jinja2 템플릿 변수 ({{ '{{' }} variable {{ '}}' }})를 적절히 활용하세요
+
+    ## 출력 형식
+
+    다음 JSON 형식으로 결과를 반환하세요:
+
+    ```json
+    {
+      "title": "생성된 프롬프트 템플릿의 제목",
+      "content": "완전한 프롬프트 템플릿 텍스트 (Jinja2 변수 포함 가능)",
+      "sentences": [
+        {
+          "text": "프롬프트의 각 논리적 섹션 또는 문단",
+          "source_references": ["참조한 소스 템플릿 ID"]
+        }
+      ],
+      "metadata": {
+        "generation_method": "prompt_generation",
+        "purpose": "생성된 프롬프트의 목적",
+        "variables": ["사용된 Jinja2 변수 목록"],
+        "best_practices": ["적용된 프롬프트 엔지니어링 원칙들"],
+        "reasoning": "프롬프트 설계 과정에 대한 설명"
+      }
+    }
+    ```
+
+    ## 프롬프트 엔지니어링 원칙
+
+    - **명확성**: 모호함 없이 명확한 지시
+    - **컨텍스트**: 충분한 배경 정보 제공
+    - **구조화**: 논리적 흐름과 섹션 구분
+    - **제약사항**: 필요한 제한사항 명시
+    - **출력 형식**: 원하는 출력 형식 명확히 정의
+    - **예시**: 구체적인 예시로 이해도 향상
+
+    ---
+
+    **중요:**
+    - 응답은 반드시 순수 JSON 형식이어야 합니다
+    - 프롬프트는 실용적이고 즉시 사용 가능해야 합니다
+    - Jinja2 템플릿 문법을 올바르게 사용하세요
+    - 사용자 요구사항을 정확히 반영하세요
+
+- task_id: prompt_optimizer
+  name: Prompt Optimizer
+  description: 기존 프롬프트를 개선하고 최적화
+  prompt_role: user
+  version: '1.0'
+  last_updated: '2025-10-16'
+  llm_provider: anthropic
+  model: claude-3-5-sonnet-20241022
+  parameters:
+    temperature: 0.2
+    max_tokens: 4000
+  template: |-
+    당신은 프롬프트 최적화 전문가입니다. 제공된 프롬프트를 분석하고 개선하세요.
+
+    {% if structured_source_documents %}
+    ## 원본 프롬프트
+    {% for source_doc in structured_source_documents %}
+    {% for sentence in source_doc.content.sentences %}
+    {{ sentence.text }}
+    {% endfor %}
+    {% endfor %}
+    {% endif %}
+
+    {% if source_documents %}
+    ## 원본 프롬프트 (Plain Text)
+    {% for doc in source_documents %}
+    {{ doc }}
+    {% endfor %}
+    {% endif %}
+
+    ## 개선 요구사항
+    {{ user_requirements | default('프롬프트를 더 명확하고 효과적으로 개선하세요') }}
+
+    ## 최적화 체크리스트
+
+    ✅ **명확성**
+    - 모호한 표현 제거
+    - 구체적 지시사항 추가
+
+    ✅ **구조**
+    - 논리적 흐름 개선
+    - 섹션 명확히 구분
+
+    ✅ **완전성**
+    - 누락된 정보 추가
+    - 엣지 케이스 고려
+
+    ✅ **효율성**
+    - 불필요한 반복 제거
+    - 간결한 표현 사용
+
+    ✅ **효과성**
+    - 원하는 출력 명확히 정의
+    - 예시 추가
+
+    JSON 형식으로 다음 구조를 따라 응답하세요:
+    {
+      "title": "최적화된 프롬프트 제목",
+      "content": "개선된 프롬프트 전체 내용",
+      "sentences": [{"text": "섹션별 내용", "source_references": ["원본 참조"]}],
+      "metadata": {
+        "generation_method": "prompt_optimization",
+        "improvements": ["개선 사항 목록"],
+        "reasoning": "최적화 근거"
+      }
+    }
